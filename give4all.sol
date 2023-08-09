@@ -11,11 +11,11 @@ contract Give4All {
     mapping(uint256 => rateStruct[]) rateOf;
     mapping(uint256 => mapping(address=>bool)) votedExisted;
     mapping(uint256 => donationStruct[]) donationOf;
+    mapping(uint256 => mapping(address=>bool)) donationWithdrawed;
 
     enum statusEnum {
         OPEN,
         WITHDRAWED,
-        REFUNDED,
         DELETED
     }
 
@@ -43,23 +43,6 @@ contract Give4All {
         address user;
         uint donationTime;
         uint score;
-    }
-
-    modifier ownerOnly(){
-        require(msg.sender == owner, "Owner reserved only");
-        _;
-    }
-
-    modifier authorOnly(uint projectId){
-        require(msg.sender == projects[projectId].owner, "Unauthorized Entity");
-        _;
-    }
-
-    modifier projectIsOpen(uint projectId){
-        require(projectId < projectCount, "Project not found");
-        require(projects[projectId].status == statusEnum.OPEN, "Project no longer opened");
-        require(projects[projectId].expiresAt > block.timestamp, "Project has expired");
-        _;
     }
 
     event Action (
@@ -99,12 +82,14 @@ contract Give4All {
         project.createAt = block.timestamp;
         project.expiresAt = expiresAt;
         project.tags = tags;
-        project.balanceOf += (msg.value - projectTax);
-        donationOf[projectCount].push(donationStruct(msg.sender, block.timestamp, msg.value - projectTax));
-
         projects.push(project);
+        if(msg.value > projectTax){
+            unchecked{
+                project.balanceOf += (msg.value - projectTax);
+                donationOf[projectCount].push(donationStruct(msg.sender, block.timestamp, msg.value - projectTax));
+            }
+        }
         ++projectCount;
-
         emit Action (
             projectCount,
             "PROJECT CREATED",
@@ -122,16 +107,18 @@ contract Give4All {
         uint raised,
         uint expiresAt,
         string[] memory tags
-    ) public projectIsOpen(id) authorOnly(id) returns (bool) {
+    ) public returns (bool) {
+        require(id < projectCount, "Project not found");
+        require(projects[id].status == statusEnum.OPEN, "Project no longer opened");
+        require(projects[id].expiresAt > block.timestamp, "Project has expired");
+        require(msg.sender == projects[id].owner, "Unauthorized Entity");
         require(bytes(title).length > 0, "Title cannot be empty");
         require(bytes(description).length > 0, "Description cannot be empty");
         require(bytes(imageURL).length > 0, "ImageURL cannot be empty");
         require(expiresAt > block.timestamp, "Expiry date not valid");
-        require(raised > 0, "Donation limit is larger than 0");
+        require(raised > projects[id].balanceOf, "Donation limit is larger than amount donated");
 
         projectStruct storage project = projects[id];
-        project.id = projectCount;
-        project.owner = msg.sender;
         project.title = title;
         project.description = description;
         project.imageURL = imageURL;
@@ -149,11 +136,16 @@ contract Give4All {
         return true;
     }
 
-    function donation(uint id) public payable projectIsOpen(id) returns (bool){
-        require(msg.value >= projectTax, "You need to spend more ETH!");
+    function donation(uint id) public payable returns (bool){
+        require(id < projectCount, "Project not found");
+        require(projects[id].status == statusEnum.OPEN, "Project no longer opened");
+        require(projects[id].expiresAt > block.timestamp, "Project has expired");
+        require(msg.value > projectTax, "You need to spend more ETH!");
 
-        projects[id].balanceOf += msg.value - projectTax;
-        donationOf[id].push(donationStruct(msg.sender, block.timestamp, msg.value - projectTax));
+        unchecked{
+            projects[id].balanceOf += (msg.value - projectTax);
+            donationOf[id].push(donationStruct(msg.sender, block.timestamp, msg.value - projectTax));
+        }
         
         emit Action (
             id,
@@ -164,7 +156,9 @@ contract Give4All {
         return true;
     }
 
-    function rate(uint id, uint score) public projectIsOpen(id) returns (bool){
+    function rate(uint id, uint score) public returns (bool){
+        require(id < projectCount, "Project not found");
+        require(projects[id].status != statusEnum.DELETED, "Project is deleted");
         require(score <= 5, "Score not valid");
         if(votedExisted[id][msg.sender]){
             rateStruct[] memory arr = rateOf[id];
@@ -183,8 +177,6 @@ contract Give4All {
             rateOf[id].push(rateStruct(msg.sender, block.timestamp, score));
             votedExisted[id][msg.sender] = true;
         }
-            
-        
         emit Action (
             id,
             "PROJECT RATED",
@@ -194,8 +186,12 @@ contract Give4All {
         return true;
     }
 
-    function deleteProject(uint id) public projectIsOpen(id) authorOnly(id) returns (bool) {
+    function deleteProject(uint id) public returns (bool) {
         require(locked == 1, "System is locked");
+        require(id < projectCount, "Project not found");
+        require(projects[id].status == statusEnum.OPEN, "Project no longer opened");
+        require(projects[id].expiresAt > block.timestamp, "Project has expired");
+        require(msg.sender == projects[id].owner, "Unauthorized Entity");
         locked = 2;
         projects[id].status = statusEnum.DELETED;
         donationStruct[] memory arr = donationOf[id];
@@ -216,7 +212,8 @@ contract Give4All {
         return true;
     }
 
-    function changeTax(uint _taxPct) public ownerOnly {
+    function changeTax(uint _taxPct) public {
+        require(msg.sender == owner, "Owner reserved only");
         projectTax = _taxPct;
     }
 
@@ -239,7 +236,7 @@ contract Give4All {
         return rateOf[id];
     }
 
-    function withdrawFromProject(uint id) public payable{
+    function withdrawFromProject(uint id) public returns(bool){
         require(id < projectCount, "Project not found");
         require(msg.sender == projects[id].owner, "Unauthorized Entity");
         require(projects[id].status == statusEnum.OPEN, "Project no longer opened");
@@ -250,5 +247,28 @@ contract Give4All {
         (bool callSuccess, ) = payable(msg.sender).call{value: projects[id].balanceOf}("");
         require(callSuccess, "Call failed");
         project.balanceOf = 0;
+        return true;
+    }
+
+    function withdrawFromProjectByDonor(uint id) public returns(bool){
+        require(locked == 1, "System is locked");
+        require(id < projectCount, "Project not found");
+        require(projects[id].status == statusEnum.OPEN, "Project no longer opened");
+        require(projects[id].balanceOf < projects[id].raised, "Project has enough donation");
+        require(projects[id].expiresAt <= block.timestamp, "Project has not expired");
+        require(donationWithdrawed[id][msg.sender] == false, "Donor withdrawed");
+        donationStruct[] memory arr = donationOf[id];
+        locked = 2;
+        uint len = arr.length;
+        for(uint i = 0; i < len; ){
+            if(arr[i].donor == msg.sender){
+                (bool callSuccess, ) = payable(arr[i].donor).call{value: arr[i].value}("");
+                require(callSuccess, "Call failed");
+            }
+            ++i;
+        }
+        donationWithdrawed[id][msg.sender] = true;
+        locked = 1;
+        return true;
     }
 }
