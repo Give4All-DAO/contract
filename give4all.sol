@@ -1,5 +1,5 @@
 /**
- *Submitted for verification at Etherscan.io on 2023-08-17
+ *Submitted for verification at Etherscan.io on 2023-08-21
 */
 
 // SPDX-License-Identifier: MIT
@@ -304,10 +304,11 @@ contract Give4All {
 
     GFAToken public token;
     uint tokenPrice = 10 ** 14;
-    int locked = 1;
     mapping(address => bool) isAdmin;
     Project[] public projects;
+    uint public projectCount;
 
+    int locked = 1;
     constructor(){
         bytes memory bytecode = type(GFAToken).creationCode;
         bytes memory code = abi.encodePacked(bytecode, abi.encode("Give4All", "GFA"));
@@ -333,7 +334,7 @@ contract Give4All {
     }
 
     function addAdmin(address user) external onlyAdmin{
-        require(isAdmin[user], "User is admin");
+        require(!isAdmin[user], "User is admin");
         isAdmin[msg.sender] = true;
         emit AddAdmin(user);
     }
@@ -369,10 +370,15 @@ contract Give4All {
             amountTokenDeposit
         );
         projects.push(project);
+        ++projectCount;
         if(amountTokenDeposit > 0){
             bool success = token.transferFrom(msg.sender, address(project), amountTokenDeposit);
             require(success, "Transfer fail");
         }
+    }
+
+    function getProjects() external view returns(Project[] memory){
+        return projects;
     }
 
     function approve(Project project) external onlyAdmin{
