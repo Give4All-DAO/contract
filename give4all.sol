@@ -1,5 +1,5 @@
 /**
- *Submitted for verification at Etherscan.io on 2023-08-21
+ *Submitted for verification at Etherscan.io on 2023-08-24
 */
 
 // SPDX-License-Identifier: MIT
@@ -155,6 +155,7 @@ contract Project {
     address public author; 
     string public title; 
     string public description; 
+    string public imageURL;
     uint public raised; 
     uint public createAt; 
     uint public expiresAt;  
@@ -173,6 +174,7 @@ contract Project {
     constructor(
         string memory _title,
         string memory _description,
+        string memory _imageURL,
         uint _raised,
         uint _expiresAt,
         address _author,
@@ -180,6 +182,7 @@ contract Project {
     ){
         title = _title;
         description = _description;
+        imageURL = _imageURL;
         raised = _raised;
         expiresAt = _expiresAt;
         author = _author;
@@ -356,17 +359,23 @@ contract Give4All {
     function createProject(
         string memory _title,
         string memory _description,
+        string memory _imageURL,
         uint _raised,
         uint _expiresAt,
         uint _amountTokenDeposit) external {
         require(bytes(_title).length > 0, "Title cannot be empty");
         require(bytes(_description).length > 0, "Description cannot be empty");
+        require(bytes(_imageURL).length > 0, "ImageURL cannot be empty");
         require(_expiresAt > block.timestamp, "Expiry date not valid");
         require(_raised > 0, "Donation limit is larger than 0");
         uint amountTokenDeposit = _amountTokenDeposit * token.decimals();
         Project project = new Project(
-            _title, _description, _raised,
-            _expiresAt, msg.sender,
+            _title, 
+            _description, 
+            _imageURL, 
+            _raised,
+            _expiresAt, 
+            msg.sender,
             amountTokenDeposit
         );
         projects.push(project);
